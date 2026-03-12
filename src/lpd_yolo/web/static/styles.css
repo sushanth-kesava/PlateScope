@@ -76,6 +76,28 @@ h1 {
   color: var(--muted);
 }
 
+.deploy-note {
+  margin-top: 16px;
+  display: grid;
+  gap: 6px;
+  max-width: 42rem;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(182, 73, 51, 0.18);
+  background: rgba(182, 73, 51, 0.08);
+  color: var(--text);
+}
+
+.deploy-note code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.deploy-note-ready {
+  border-color: rgba(43, 116, 73, 0.16);
+  background: rgba(43, 116, 73, 0.08);
+}
+
 .hero-panel {
   padding: 20px;
   display: grid;

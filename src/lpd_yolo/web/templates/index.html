@@ -13,6 +13,17 @@
           <p class="eyebrow">License Plate Detection</p>
           <h1>PlateScope</h1>
           <p class="lead">Upload one vehicle image. The app finds the plate and reads the text automatically.</p>
+          {% if not model_ready %}
+          <div class="deploy-note">
+            <strong>Model not bundled.</strong>
+            <span>Deploy a weights file at <code>models/best.pt</code> or set the <code>LPD_WEIGHTS</code> environment variable in Vercel.</span>
+          </div>
+          {% elif weights_path %}
+          <div class="deploy-note deploy-note-ready">
+            <strong>Active model</strong>
+            <span>{{ weights_path }}</span>
+          </div>
+          {% endif %}
         </div>
         <div class="hero-panel">
           <div class="metric-card">
@@ -48,11 +59,11 @@
             <h2>Upload Image</h2>
             <p>Select a vehicle photo to start detection immediately.</p>
           </div>
-          <form action="/predict" method="post" enctype="multipart/form-data" class="upload-form">
+          <form action="{{ url_for('predict') }}" method="post" enctype="multipart/form-data" class="upload-form">
             <label class="dropzone">
               <span class="dropzone-title">Choose vehicle image</span>
               <span class="dropzone-copy">Supported: JPG, PNG, BMP, WEBP</span>
-              <input type="file" name="image" accept=".jpg,.jpeg,.png,.bmp,.webp" onchange="this.form.requestSubmit()" required>
+              <input type="file" name="image" accept=".jpg,.jpeg,.png,.bmp,.webp" onchange="this.form.requestSubmit()" {% if not model_ready %}disabled{% endif %} required>
             </label>
           </form>
 

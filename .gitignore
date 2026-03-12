@@ -9,3 +9,6 @@ venv/
 .DS_Store
 runs/
 *.pt
+!models/
+!models/.gitkeep
+!models/*.pt

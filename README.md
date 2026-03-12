@@ -196,7 +196,34 @@ http://127.0.0.1:5000
 
 Notes:
 
-- The website uses `runs/train/kaggle_lp_full_50/weights/best.pt` by default.
-- To use another checkpoint, set `LPD_WEIGHTS` before launch.
+- The website first checks `LPD_WEIGHTS`, then looks for `models/best.pt` and other repo-relative fallback paths.
+- Absolute local paths should only be used for local development, not deployment.
 - OCR in the website is optional and requires the system `tesseract` binary.
+
+## 9. Deploy on Vercel
+
+This repository now includes a Vercel-compatible Flask entrypoint at `api/index.py` and routing config in `vercel.json`.
+
+Before deploying:
+
+```bash
+mkdir -p models
+cp /path/to/your/best.pt models/best.pt
+```
+
+If you do not want to use `models/best.pt`, set `LPD_WEIGHTS` to another file path inside the deployed project bundle.
+
+Deploy steps:
+
+```bash
+vercel
+```
+
+Important deployment notes:
+
+- Vercel serverless functions have cold starts, CPU limits, and request time limits. YOLO inference will work best for low-traffic demos, not heavy production traffic.
+- Use a repo-relative model path such as `models/best.pt`; absolute local paths will not work in Vercel.
+- `opencv-python` and `easyocr` make deploys heavier. If build size or runtime becomes an issue, move OCR to an optional path or deploy on a VM/container platform instead.
+- The home page shows whether the model file was found after deployment.
+- Because `models/*.pt` is unignored, you can commit a deployable checkpoint directly when you want the Vercel deployment to include it.
 # PlateScope

@@ -1,4 +1,5 @@
 import base64
+import json
 import os
 from pathlib import Path
 import re
@@ -21,24 +22,50 @@ except ImportError:  # pragma: no cover
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_WEIGHTS = Path(
-    "/Users/kesavasushanth/runs/detect/runs/train/kaggle_lp_updated_472/weights/best.pt"
-)
 TEMPLATE_DIR = Path(__file__).resolve().parent / "web" / "templates"
 STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+DEFAULT_METRICS_PATH = PROJECT_ROOT / "runs" / "eval" / "kaggle_lp_updated_47_metrics.json"
+WEIGHTS_ENV_VAR = "LPD_WEIGHTS"
+DEFAULT_WEIGHT_CANDIDATES = [
+    PROJECT_ROOT / "models" / "best.pt",
+    PROJECT_ROOT / "runs" / "train" / "license_plate_detector" / "weights" / "best.pt",
+    PROJECT_ROOT / "runs" / "train" / "kaggle_lp_full_50" / "weights" / "best.pt",
+    PROJECT_ROOT / "yolov8n.pt",
+]
 
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR), static_folder=str(STATIC_DIR))
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 _model: YOLO | None = None
 _ocr_reader: Any | None = None
 
 
+def resolve_weights_path() -> Path:
+    env_path = os.getenv(WEIGHTS_ENV_VAR)
+    candidates = [Path(env_path).expanduser()] if env_path else []
+    candidates.extend(DEFAULT_WEIGHT_CANDIDATES)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    searched_paths = "\n".join(f"- {candidate}" for candidate in candidates)
+    raise FileNotFoundError(
+        "Model weights not found. Set LPD_WEIGHTS to a deployed .pt file or bundle one of these paths:\n"
+        f"{searched_paths}"
+    )
+
+
+def load_metrics() -> dict[str, Any] | None:
+    if not DEFAULT_METRICS_PATH.exists():
+        return None
+    return json.loads(DEFAULT_METRICS_PATH.read_text(encoding="utf-8"))
+
+
 def get_model() -> YOLO:
     global _model
-    weights_path = Path(os.getenv("LPD_WEIGHTS", str(DEFAULT_WEIGHTS)))
-    if not weights_path.exists():
-        raise FileNotFoundError(f"Model weights not found: {weights_path}")
     if _model is None:
+        weights_path = resolve_weights_path()
         _model = YOLO(str(weights_path))
     return _model
 
@@ -437,25 +464,44 @@ def run_inference(image_bytes: bytes) -> dict[str, Any]:
 
 @app.get("/")
 def index():
-    metrics_path = PROJECT_ROOT / "runs" / "eval" / "kaggle_lp_updated_47_metrics.json"
-    metrics = None
-    if metrics_path.exists():
-        import json
+    return render_template(
+        "index.html",
+        result=None,
+        error=None,
+        metrics=load_metrics(),
+        model_ready=model_is_ready(),
+        weights_path=str(get_current_weights_path()) if model_is_ready() else None,
+    )
 
-        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-    return render_template("index.html", result=None, error=None, metrics=metrics)
+
+def get_current_weights_path() -> Path | None:
+    try:
+        return resolve_weights_path()
+    except FileNotFoundError:
+        return None
+
+
+def model_is_ready() -> bool:
+    return get_current_weights_path() is not None
 
 
 @app.post("/predict")
 def predict():
     file = request.files.get("image")
+    metrics = load_metrics()
 
-    metrics_path = PROJECT_ROOT / "runs" / "eval" / "kaggle_lp_updated_47_metrics.json"
-    metrics = None
-    if metrics_path.exists():
-        import json
-
-        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    if not model_is_ready():
+        return render_template(
+            "index.html",
+            result=None,
+            error=(
+                "Model weights are not deployed. Set the LPD_WEIGHTS environment variable or add a model file "
+                "at models/best.pt before deploying to Vercel."
+            ),
+            metrics=metrics,
+            model_ready=False,
+            weights_path=None,
+        )
 
     if file is None or not file.filename:
         return render_template(
@@ -463,6 +509,8 @@ def predict():
             result=None,
             error="Choose an image to analyze.",
             metrics=metrics,
+            model_ready=True,
+            weights_path=str(get_current_weights_path()),
         )
 
     if not allowed_file(file.filename):
@@ -471,6 +519,8 @@ def predict():
             result=None,
             error="Unsupported file type. Upload JPG, PNG, BMP, or WEBP.",
             metrics=metrics,
+            model_ready=True,
+            weights_path=str(get_current_weights_path()),
         )
 
     try:
@@ -481,6 +531,8 @@ def predict():
             result=None,
             error=str(exc),
             metrics=metrics,
+            model_ready=True,
+            weights_path=str(get_current_weights_path()),
         )
 
     return render_template(
@@ -488,6 +540,8 @@ def predict():
         result=result,
         error=None,
         metrics=metrics,
+        model_ready=True,
+        weights_path=str(get_current_weights_path()),
     )
 
 
