@@ -52,7 +52,7 @@ pip install --upgrade pip
 pip install -r requirements-local.txt
 ```
 
-For a lean deployment-only install without OCR extras, use `requirements.txt`.
+For a lean deployment-only install without OCR extras, use `requirements.txt`. For local training, evaluation, `.pt` inference, and OCR workflows, use `requirements-local.txt`.
 
 ## 2. Prepare Dataset (YOLO Format)
 
@@ -199,8 +199,18 @@ http://127.0.0.1:5000
 Notes:
 
 - The website first checks `LPD_WEIGHTS`, then looks for `models/best.pt` and other repo-relative fallback paths.
+- If `models/best.onnx` exists, the website will prefer that runtime first.
 - Absolute local paths should only be used for local development, not deployment.
 - OCR in the website is optional and requires the local OCR extras from `requirements-local.txt` plus the system `tesseract` binary.
+
+Export a trained PyTorch checkpoint to ONNX for deployment:
+
+```bash
+python -m src.lpd_yolo.export_onnx \
+  --weights runs/train/license_plate_detector/weights/best.pt \
+  --output models/best.onnx \
+  --imgsz 960
+```
 
 ## 9. Deploy on Vercel
 
@@ -210,10 +220,13 @@ Before deploying:
 
 ```bash
 mkdir -p models
-cp /path/to/your/best.pt models/best.pt
+python -m src.lpd_yolo.export_onnx \
+  --weights /path/to/your/best.pt \
+  --output models/best.onnx \
+  --imgsz 960
 ```
 
-If you do not want to use `models/best.pt`, set `LPD_WEIGHTS` to another file path inside the deployed project bundle.
+If you do not want to use `models/best.onnx`, set `LPD_WEIGHTS` to another ONNX path inside the deployed project bundle.
 
 Deploy steps:
 
@@ -224,13 +237,13 @@ vercel
 Important deployment notes:
 
 - Vercel serverless functions have cold starts, CPU limits, and request time limits. YOLO inference will work best for low-traffic demos, not heavy production traffic.
-- Use a repo-relative model path such as `models/best.pt`; absolute local paths will not work in Vercel.
+- Use a repo-relative model path such as `models/best.onnx`; absolute local paths will not work in Vercel.
 - This repo includes `.vercelignore` so training datasets and run artifacts are not bundled into the function.
 - Vercel now uses the lean `requirements.txt`; install `requirements-local.txt` only for local OCR/training workflows.
 - OCR is intentionally excluded from the default Vercel dependency set because `easyocr` and a system Tesseract binary are a poor fit for Vercel Functions.
 - Pinning Python with `.python-version` avoids Vercel choosing an arbitrary interpreter version during dependency resolution.
 - The home page shows whether the model file was found after deployment.
-- Because `models/*.pt` is unignored, you can commit a deployable checkpoint directly when you want the Vercel deployment to include it.
+- Because the deployment runtime is lean, ONNX is the preferred model format for hosted demos.
 
 ## 10. Deploy on Railway
 
@@ -245,7 +258,10 @@ Before deploying:
 
 ```bash
 mkdir -p models
-cp /path/to/your/best.pt models/best.pt
+python -m src.lpd_yolo.export_onnx \
+  --weights /path/to/your/best.pt \
+  --output models/best.onnx \
+  --imgsz 960
 ```
 
 Then push the repo and deploy it on Railway from GitHub. Railway will detect the root `Dockerfile` automatically.
@@ -259,7 +275,8 @@ PORT=8080 gunicorn main:app --bind 0.0.0.0:$PORT --workers 1 --timeout 300
 Important Railway notes:
 
 - The app listens on `0.0.0.0` and exposes `/health` for Railway health checks.
-- Keep the model at `models/best.pt`, or set `LPD_WEIGHTS` to a valid in-container path.
+- Railway should use `models/best.onnx`, or `LPD_WEIGHTS` should point to an ONNX file inside the container.
 - `datasets/` and `runs/` are intentionally excluded from the Docker build context to keep builds smaller.
 - OCR is still optional and not part of the default deployment dependency set.
+- Railway intentionally does not install Ultralytics or PyTorch in production, which keeps the image much smaller than the `.pt` runtime.
 # PlateScope

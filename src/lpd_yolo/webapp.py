@@ -8,7 +8,11 @@ from typing import Any
 import cv2
 import numpy as np
 from flask import Flask, render_template, request
-from ultralytics import YOLO
+
+try:
+    from ultralytics import YOLO
+except ImportError:  # pragma: no cover
+    YOLO = None
 
 try:
     import pytesseract
@@ -28,14 +32,17 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 DEFAULT_METRICS_PATH = PROJECT_ROOT / "runs" / "eval" / "kaggle_lp_updated_47_metrics.json"
 WEIGHTS_ENV_VAR = "LPD_WEIGHTS"
 DEFAULT_WEIGHT_CANDIDATES = [
+    PROJECT_ROOT / "models" / "best.onnx",
     PROJECT_ROOT / "models" / "best.pt",
     PROJECT_ROOT / "runs" / "train" / "license_plate_detector" / "weights" / "best.pt",
     PROJECT_ROOT / "runs" / "train" / "kaggle_lp_full_50" / "weights" / "best.pt",
 ]
+ONNX_INPUT_SIZE = int(os.getenv("LPD_ONNX_IMGSZ", "960"))
+ONNX_PAD_VALUE = 114
 
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR), static_folder=str(STATIC_DIR))
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
-_model: YOLO | None = None
+_model: Any | None = None
 _ocr_reader: Any | None = None
 
 
@@ -50,7 +57,7 @@ def resolve_weights_path() -> Path:
 
     searched_paths = "\n".join(f"- {candidate}" for candidate in candidates)
     raise FileNotFoundError(
-        "Model weights not found. Set LPD_WEIGHTS to a deployed .pt file or bundle one of these paths:\n"
+        "Model weights not found. Set LPD_WEIGHTS to a deployed .onnx or .pt file or bundle one of these paths:\n"
         f"{searched_paths}"
     )
 
@@ -61,12 +68,43 @@ def load_metrics() -> dict[str, Any] | None:
     return json.loads(DEFAULT_METRICS_PATH.read_text(encoding="utf-8"))
 
 
-def get_model() -> YOLO:
+def get_model() -> Any:
     global _model
     if _model is None:
         weights_path = resolve_weights_path()
-        _model = YOLO(str(weights_path))
+        if weights_path.suffix.lower() == ".onnx":
+            _model = cv2.dnn.readNetFromONNX(str(weights_path))
+            _model.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+            _model.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        else:
+            if YOLO is None:
+                raise RuntimeError(
+                    "Ultralytics is not installed in this runtime. Export your deployed model to ONNX and place it at models/best.onnx."
+                )
+            _model = YOLO(str(weights_path))
     return _model
+
+
+def get_model_status_error() -> str | None:
+    weights_path = get_current_weights_path()
+    if weights_path is None:
+        return (
+            "Model weights are not deployed. Add models/best.onnx for Railway, or set LPD_WEIGHTS to a valid model path."
+        )
+    if weights_path.suffix.lower() == ".pt" and YOLO is None:
+        return (
+            "This deployment runtime expects an ONNX model. Export your checkpoint to models/best.onnx or point LPD_WEIGHTS to an ONNX file."
+        )
+    return None
+
+
+def get_model_runtime_label() -> str:
+    weights_path = get_current_weights_path()
+    if weights_path is None:
+        return "Unavailable"
+    if weights_path.suffix.lower() == ".onnx":
+        return "OpenCV DNN (ONNX)"
+    return "Ultralytics YOLO"
 
 
 def get_ocr_reader() -> Any | None:
@@ -374,7 +412,78 @@ def _candidate_score(box: list[int], confidence: float, image_w: int, image_h: i
     return confidence + 0.12 * center_bonus + 0.08 * aspect_bonus + 0.05 * size_bonus
 
 
-def _collect_candidate_boxes(model: YOLO, image_bgr: np.ndarray, confidence: float) -> list[tuple[list[int], float]]:
+def _letterbox(image_bgr: np.ndarray, size: int) -> tuple[np.ndarray, float, int, int]:
+    image_h, image_w = image_bgr.shape[:2]
+    scale = min(size / image_w, size / image_h)
+    resized_w = max(1, int(round(image_w * scale)))
+    resized_h = max(1, int(round(image_h * scale)))
+    resized = cv2.resize(image_bgr, (resized_w, resized_h), interpolation=cv2.INTER_LINEAR)
+    canvas = np.full((size, size, 3), ONNX_PAD_VALUE, dtype=np.uint8)
+    pad_x = (size - resized_w) // 2
+    pad_y = (size - resized_h) // 2
+    canvas[pad_y:pad_y + resized_h, pad_x:pad_x + resized_w] = resized
+    return canvas, scale, pad_x, pad_y
+
+
+def _collect_candidate_boxes_onnx(model: Any, image_bgr: np.ndarray, confidence: float) -> list[tuple[list[int], float]]:
+    image_h, image_w = image_bgr.shape[:2]
+    candidates: list[tuple[list[int], float]] = []
+
+    for source_image in (image_bgr, _enhance_for_detection(image_bgr)):
+        letterboxed, scale, pad_x, pad_y = _letterbox(source_image, ONNX_INPUT_SIZE)
+        blob = cv2.dnn.blobFromImage(letterboxed, scalefactor=1.0 / 255.0, size=(ONNX_INPUT_SIZE, ONNX_INPUT_SIZE), swapRB=True, crop=False)
+        model.setInput(blob)
+        output = model.forward()
+        predictions = np.asarray(output)
+
+        if predictions.ndim == 3:
+            predictions = predictions[0]
+        if predictions.ndim != 2:
+            continue
+        if predictions.shape[0] < predictions.shape[1]:
+            predictions = predictions.T
+
+        boxes_xywh: list[list[int]] = []
+        confidences: list[float] = []
+        for row in predictions:
+            if row.shape[0] < 5:
+                continue
+            class_scores = row[4:]
+            score = float(class_scores.max()) if class_scores.size else 0.0
+            if score < confidence:
+                continue
+
+            center_x, center_y, width, height = row[:4]
+            x1 = int(round((center_x - (width / 2.0) - pad_x) / scale))
+            y1 = int(round((center_y - (height / 2.0) - pad_y) / scale))
+            x2 = int(round((center_x + (width / 2.0) - pad_x) / scale))
+            y2 = int(round((center_y + (height / 2.0) - pad_y) / scale))
+
+            x1 = max(0, min(image_w - 1, x1))
+            y1 = max(0, min(image_h - 1, y1))
+            x2 = max(0, min(image_w - 1, x2))
+            y2 = max(0, min(image_h - 1, y2))
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            boxes_xywh.append([x1, y1, x2 - x1, y2 - y1])
+            confidences.append(score)
+
+        if not boxes_xywh:
+            continue
+
+        indices = cv2.dnn.NMSBoxes(boxes_xywh, confidences, confidence, NMS_IOU_THRESHOLD)
+        if len(indices) == 0:
+            continue
+
+        for index in np.array(indices).reshape(-1):
+            x, y, width, height = boxes_xywh[int(index)]
+            candidates.append(([x, y, x + width, y + height], float(confidences[int(index)])))
+
+    return candidates
+
+
+def _collect_candidate_boxes_yolo(model: Any, image_bgr: np.ndarray, confidence: float) -> list[tuple[list[int], float]]:
     passes = [
         (image_bgr, PRIMARY_IMGSZ, True),
         (image_bgr, SECONDARY_IMGSZ, False),
@@ -397,6 +506,13 @@ def _collect_candidate_boxes(model: YOLO, image_bgr: np.ndarray, confidence: flo
         candidates.extend(([max(0, int(v)) for v in box], float(score)) for box, score in zip(boxes, confs))
 
     return candidates
+
+
+def _collect_candidate_boxes(model: Any, image_bgr: np.ndarray, confidence: float) -> list[tuple[list[int], float]]:
+    weights_path = resolve_weights_path()
+    if weights_path.suffix.lower() == ".onnx":
+        return _collect_candidate_boxes_onnx(model, image_bgr, confidence)
+    return _collect_candidate_boxes_yolo(model, image_bgr, confidence)
 
 
 def run_inference(image_bytes: bytes) -> dict[str, Any]:
@@ -466,10 +582,11 @@ def index():
     return render_template(
         "index.html",
         result=None,
-        error=None,
+        error=get_model_status_error(),
         metrics=load_metrics(),
         model_ready=model_is_ready(),
-        weights_path=str(get_current_weights_path()) if model_is_ready() else None,
+        weights_path=str(get_current_weights_path()) if get_current_weights_path() else None,
+        model_runtime=get_model_runtime_label(),
     )
 
 
@@ -478,6 +595,7 @@ def health() -> tuple[dict[str, Any], int]:
     return {
         "status": "ok",
         "model_ready": model_is_ready(),
+        "runtime": get_model_runtime_label(),
     }, 200
 
 
@@ -489,7 +607,7 @@ def get_current_weights_path() -> Path | None:
 
 
 def model_is_ready() -> bool:
-    return get_current_weights_path() is not None
+    return get_model_status_error() is None
 
 
 @app.post("/predict")
@@ -501,13 +619,11 @@ def predict():
         return render_template(
             "index.html",
             result=None,
-            error=(
-                "Model weights are not deployed. Set the LPD_WEIGHTS environment variable or add a model file "
-                "at models/best.pt before deploying to Vercel."
-            ),
+            error=get_model_status_error(),
             metrics=metrics,
             model_ready=False,
-            weights_path=None,
+            weights_path=str(get_current_weights_path()) if get_current_weights_path() else None,
+            model_runtime=get_model_runtime_label(),
         )
 
     if file is None or not file.filename:
@@ -518,6 +634,7 @@ def predict():
             metrics=metrics,
             model_ready=True,
             weights_path=str(get_current_weights_path()),
+            model_runtime=get_model_runtime_label(),
         )
 
     if not allowed_file(file.filename):
@@ -528,6 +645,7 @@ def predict():
             metrics=metrics,
             model_ready=True,
             weights_path=str(get_current_weights_path()),
+            model_runtime=get_model_runtime_label(),
         )
 
     try:
@@ -540,6 +658,7 @@ def predict():
             metrics=metrics,
             model_ready=True,
             weights_path=str(get_current_weights_path()),
+            model_runtime=get_model_runtime_label(),
         )
 
     return render_template(
@@ -549,6 +668,7 @@ def predict():
         metrics=metrics,
         model_ready=True,
         weights_path=str(get_current_weights_path()),
+        model_runtime=get_model_runtime_label(),
     )
 
 

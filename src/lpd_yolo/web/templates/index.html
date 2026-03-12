@@ -16,19 +16,19 @@
           {% if not model_ready %}
           <div class="deploy-note">
             <strong>Model not bundled.</strong>
-            <span>Deploy a weights file at <code>models/best.pt</code> or set the <code>LPD_WEIGHTS</code> environment variable in Vercel.</span>
+            <span>Deploy an ONNX model at <code>models/best.onnx</code> or set <code>LPD_WEIGHTS</code> to a valid ONNX path for Railway.</span>
           </div>
           {% elif weights_path %}
           <div class="deploy-note deploy-note-ready">
             <strong>Active model</strong>
-            <span>{{ weights_path }}</span>
+            <span>{{ model_runtime }} · {{ weights_path }}</span>
           </div>
           {% endif %}
         </div>
         <div class="hero-panel">
           <div class="metric-card">
             <span class="metric-label">Model</span>
-            <strong>YOLOv8 License Plate</strong>
+            <strong>{{ model_runtime if model_runtime else 'License Plate Detector' }}</strong>
           </div>
           {% if metrics %}
           <div class="metrics-grid">
