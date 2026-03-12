@@ -1,0 +1,4 @@
+-r requirements.txt
+matplotlib>=3.8.0
+pytesseract>=0.3.10
+easyocr>=1.7.1

@@ -49,8 +49,10 @@ Python project for detecting vehicle number plates using YOLO bounding boxes for
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-local.txt
 ```
+
+For a lean deployment-only install without OCR extras, use `requirements.txt`.
 
 ## 2. Prepare Dataset (YOLO Format)
 
@@ -198,7 +200,7 @@ Notes:
 
 - The website first checks `LPD_WEIGHTS`, then looks for `models/best.pt` and other repo-relative fallback paths.
 - Absolute local paths should only be used for local development, not deployment.
-- OCR in the website is optional and requires the system `tesseract` binary.
+- OCR in the website is optional and requires the local OCR extras from `requirements-local.txt` plus the system `tesseract` binary.
 
 ## 9. Deploy on Vercel
 
@@ -223,7 +225,41 @@ Important deployment notes:
 
 - Vercel serverless functions have cold starts, CPU limits, and request time limits. YOLO inference will work best for low-traffic demos, not heavy production traffic.
 - Use a repo-relative model path such as `models/best.pt`; absolute local paths will not work in Vercel.
-- `opencv-python` and `easyocr` make deploys heavier. If build size or runtime becomes an issue, move OCR to an optional path or deploy on a VM/container platform instead.
+- This repo includes `.vercelignore` so training datasets and run artifacts are not bundled into the function.
+- Vercel now uses the lean `requirements.txt`; install `requirements-local.txt` only for local OCR/training workflows.
+- OCR is intentionally excluded from the default Vercel dependency set because `easyocr` and a system Tesseract binary are a poor fit for Vercel Functions.
+- Pinning Python with `.python-version` avoids Vercel choosing an arbitrary interpreter version during dependency resolution.
 - The home page shows whether the model file was found after deployment.
 - Because `models/*.pt` is unignored, you can commit a deployable checkpoint directly when you want the Vercel deployment to include it.
+
+## 10. Deploy on Railway
+
+This repository now includes Railway deployment files:
+
+- `main.py` exports the Flask app for production servers.
+- `Dockerfile` gives Railway an explicit build instead of relying on Railpack auto-detection.
+- `railway.json` sets deployment health checks.
+- `.dockerignore` keeps `datasets/` and `runs/` out of the Docker build context.
+
+Before deploying:
+
+```bash
+mkdir -p models
+cp /path/to/your/best.pt models/best.pt
+```
+
+Then push the repo and deploy it on Railway from GitHub. Railway will detect the root `Dockerfile` automatically.
+
+If you prefer to run it locally the same way Railway will run it, use:
+
+```bash
+PORT=8080 gunicorn main:app --bind 0.0.0.0:$PORT --workers 1 --timeout 300
+```
+
+Important Railway notes:
+
+- The app listens on `0.0.0.0` and exposes `/health` for Railway health checks.
+- Keep the model at `models/best.pt`, or set `LPD_WEIGHTS` to a valid in-container path.
+- `datasets/` and `runs/` are intentionally excluded from the Docker build context to keep builds smaller.
+- OCR is still optional and not part of the default deployment dependency set.
 # PlateScope

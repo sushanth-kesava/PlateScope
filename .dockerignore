@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+.vscode
+__pycache__/
+*.pyc
+.DS_Store
+datasets/
+runs/
+api/
+vercel.json
+yolov8n.pt

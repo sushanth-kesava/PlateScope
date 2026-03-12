@@ -31,7 +31,6 @@ DEFAULT_WEIGHT_CANDIDATES = [
     PROJECT_ROOT / "models" / "best.pt",
     PROJECT_ROOT / "runs" / "train" / "license_plate_detector" / "weights" / "best.pt",
     PROJECT_ROOT / "runs" / "train" / "kaggle_lp_full_50" / "weights" / "best.pt",
-    PROJECT_ROOT / "yolov8n.pt",
 ]
 
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR), static_folder=str(STATIC_DIR))
@@ -474,6 +473,14 @@ def index():
     )
 
 
+@app.get("/health")
+def health() -> tuple[dict[str, Any], int]:
+    return {
+        "status": "ok",
+        "model_ready": model_is_ready(),
+    }, 200
+
+
 def get_current_weights_path() -> Path | None:
     try:
         return resolve_weights_path()
@@ -546,4 +553,4 @@ def predict():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False)
