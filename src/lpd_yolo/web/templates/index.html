@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PlateScope</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">License Plate Detection</p>
+          <h1>PlateScope</h1>
+          <p class="lead">Upload one vehicle image. The app finds the plate and reads the text automatically.</p>
+        </div>
+        <div class="hero-panel">
+          <div class="metric-card">
+            <span class="metric-label">Model</span>
+            <strong>YOLOv8 License Plate</strong>
+          </div>
+          {% if metrics %}
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <span class="metric-label">mAP50</span>
+              <strong>{{ '%.3f'|format(metrics['mAP50']) }}</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">Precision</span>
+              <strong>{{ '%.3f'|format(metrics['precision']) }}</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">Recall</span>
+              <strong>{{ '%.3f'|format(metrics['recall']) }}</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">mAP50-95</span>
+              <strong>{{ '%.3f'|format(metrics['mAP50_95']) }}</strong>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="control-panel">
+          <div class="panel-title-block">
+            <h2>Upload Image</h2>
+            <p>Select a vehicle photo to start detection immediately.</p>
+          </div>
+          <form action="/predict" method="post" enctype="multipart/form-data" class="upload-form">
+            <label class="dropzone">
+              <span class="dropzone-title">Choose vehicle image</span>
+              <span class="dropzone-copy">Supported: JPG, PNG, BMP, WEBP</span>
+              <input type="file" name="image" accept=".jpg,.jpeg,.png,.bmp,.webp" onchange="this.form.requestSubmit()" required>
+            </label>
+          </form>
+
+          <div class="helper-list">
+            <p>Best results: front or rear view, visible plate, good lighting.</p>
+            <p>The app reads one main plate per image for higher accuracy.</p>
+          </div>
+
+          {% if error %}
+          <div class="alert error">{{ error }}</div>
+          {% endif %}
+        </section>
+
+        <section class="result-panel">
+          {% if result %}
+          <div class="panel-title-block result-title-block">
+            <h2>Result</h2>
+            <p>Detected plate text and highlighted vehicle image.</p>
+          </div>
+          <div class="result-summary">
+            <div class="summary-card">
+              <span class="summary-label">Detections</span>
+              <strong>{{ result.count }}</strong>
+            </div>
+            <div class="summary-card summary-card-primary">
+              <span class="summary-label">Detected Number Plate</span>
+              <strong>{{ result.detections[0].plate_text if result.detections and result.detections[0].plate_text else 'Not read clearly' }}</strong>
+            </div>
+          </div>
+
+          <div class="image-frame">
+            <img src="data:image/jpeg;base64,{{ result.image_b64 }}" alt="Detection result">
+          </div>
+
+          <div class="detection-list">
+            {% for detection in result.detections %}
+            <article class="detection-card">
+              <div class="detection-head">
+                <strong>Plate Crop</strong>
+                <span class="conf-badge">Detected</span>
+              </div>
+              {% if detection.crop_b64 %}
+              <img class="plate-crop" src="data:image/jpeg;base64,{{ detection.crop_b64 }}" alt="Plate {{ detection.id }} crop">
+              {% endif %}
+              {% if detection.plate_text %}
+              <p class="ocr-text">{{ detection.plate_text }}</p>
+              {% else %}
+              <p class="ocr-text">Not read clearly</p>
+              {% endif %}
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="empty-state">
+            <h2>Ready for Detection</h2>
+            <p>
+              Upload a vehicle image to see the detected bounding box, plate crop, and recognized plate text.
+            </p>
+          </div>
+          {% endif %}
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

@@ -193,6 +193,7 @@ Then open:
 ```text
 http://127.0.0.1:5000
 ```
+
 Notes:
 
 - The website uses `runs/train/kaggle_lp_full_50/weights/best.pt` by default.

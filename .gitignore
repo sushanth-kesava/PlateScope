@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+*.egg-info/
+.venv/
+venv/
+.env
+.DS_Store
+runs/
+*.pt

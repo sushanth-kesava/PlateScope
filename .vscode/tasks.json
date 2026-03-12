@@ -1,0 +1,26 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Compile Python Sources",
+			"type": "shell",
+			"command": "/opt/homebrew/bin/python3",
+			"args": [
+				"-m",
+				"compileall",
+				"src"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Run Web App",
+			"type": "shell",
+			"command": "/Users/kesavasushanth/Downloads/lpd/.venv/bin/python",
+			"args": [
+				"-m",
+				"src.lpd_yolo.webapp"
+			],
+			"isBackground": true
+		}
+	]
+}
